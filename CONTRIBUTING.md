@@ -15,9 +15,9 @@ seams — most features should slot in behind an existing interface.
 
 1. Go 1.25+ (any Go ≥ 1.21 works too — the go toolchain auto-downloads the
    version pinned in go.mod) and Docker.
-2. `docker compose up -d postgres` for a local database (the integration
-   suite can also spin up its own ephemeral container — see "How the
-   integration test layer works" below).
+2. `docker compose --profile dev up -d postgres` for a local database (the
+   integration suite can also spin up its own ephemeral container — see
+   "How the integration test layer works" below).
 3. `make test` for the unit suite, race-detector enabled
    (`go test -race ./...`) — the same race checking CI runs, so a data
    race can't pass locally and fail in CI. The integration tests are

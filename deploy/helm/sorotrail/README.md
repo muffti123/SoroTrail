@@ -79,8 +79,8 @@ helm install sorotrail ./deploy/helm/sorotrail \
 kubectl get pods
 kubectl logs -l app.kubernetes.io/name=sorotrail
 kubectl port-forward svc/sorotrail 8080:80
-curl http://localhost:8080/health
-# {"status":"ok","checks":{"database":"ok","rpc":"ok"}}
+curl http://localhost:8080/readyz
+# {"status":"ok","checks":{"database":"ok","rpc":"ok","ingestion_lag":"ok"}}
 ```
 
 ### 5. Tear down

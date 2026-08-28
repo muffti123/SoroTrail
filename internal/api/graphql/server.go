@@ -1,16 +1,13 @@
 package graphql
 
 import (
+	_ "embed"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -18,6 +15,16 @@ import (
 
 	"github.com/sorotrail/sorotrail/internal/api"
 )
+
+// schemaSDL is the GraphQL schema definition, embedded at build time so the
+// binary is self-contained. The schema previously was read from the source
+// tree at startup via runtime.Caller, which broke in deployed containers
+// (and any relocated binary) where the source tree is absent — the process
+// crashed at startup unable to find schema.graphqls. Embedding makes the
+// schema travel with the binary regardless of working directory or image.
+//
+//go:embed schema.graphqls
+var schemaSDL string
 
 // Handler is the runtime for the GraphQL transport: one Resolver,
 // one parsed schema, plus a slog logger. Safe for use across
@@ -62,33 +69,12 @@ func New(s api.ServerDeps, log *slog.Logger, enablePlayground bool) (*Handler, e
 	return h, nil
 }
 
-// loadSDL reads the schema file from the package's data directory.
-// Tests run from the package directory so the canonical path is fast
-// to find; production builds find it via runtime.Caller as a stable
-// reference point regardless of the working directory.
+// loadSDL returns the package's embedded GraphQL schema SDL. It is
+// embedded (see schemaSDL), so it always resolves — in tests run from
+// the package directory and in a deployed container alike — without
+// depending on the working directory or the source tree being present.
 func loadSDL() (string, error) {
-	here, err := runtimeFile()
-	if err != nil {
-		return "", err
-	}
-	candidates := []string{
-		filepath.Join(here, "schema.graphqls"),
-		filepath.Join(here, "internal", "api", "graphql", "schema.graphqls"),
-	}
-	for _, p := range candidates {
-		if b, rerr := os.ReadFile(p); rerr == nil {
-			return string(b), nil
-		}
-	}
-	return "", fmt.Errorf("schema.graphqls not found (searched: %s)", strings.Join(candidates, ", "))
-}
-
-func runtimeFile() (string, error) {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("runtime.Caller failed")
-	}
-	return filepath.Dir(file), nil
+	return schemaSDL, nil
 }
 
 // registerRoutes wires the typed root Query fields to dispatcher

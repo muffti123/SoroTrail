@@ -29,6 +29,25 @@ func TestHealthcheckReturnsZeroOn2xx(t *testing.T) {
 	}
 }
 
+func TestHealthcheckDefaultsToReadyz(t *testing.T) {
+	// The default probe target is /readyz — the same readiness signal
+	// the Dockerfile HEALTHCHECK and the compose healthcheck use — so a
+	// bare `sorotrail healthcheck` probes readiness, not mere liveness.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/readyz" {
+			t.Errorf("expected /readyz, got %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	t.Setenv("HTTP_ADDR", addr)
+	if got := runHealthcheck(nil); got != 0 {
+		t.Fatalf("expected exit code 0 for /readyz 200, got %d", got)
+	}
+}
+
 func TestHealthcheckReturnsOneOn503(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

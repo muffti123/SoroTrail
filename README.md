@@ -17,7 +17,6 @@ HTTP API long after the RPC has forgotten them.
 ```
 
 ## Quickstart
-text
 
 ### Published image (fastest)
 
@@ -35,35 +34,66 @@ Pin a specific release with a version tag instead of `latest`, e.g.
 `ghcr.io/sorotrail/sorotrail:v1.2.0`. See [Configuration](#configuration) for
 the full list of environment variables.
 
-### Docker Compose (full stack)
+### Docker Compose
 
-Brings up Postgres and the indexer together — no external database required:
+`docker-compose.yml` ships three environments as
+[Compose profiles](https://docs.docker.com/compose/profiles/) — start exactly
+one to bring up the intended services for that environment:
 
-docker compose up --build
-This starts Postgres and the indexer against the public Stellar testnet RPC.
+| Profile | Brings up | Use for |
+| --- | --- | --- |
+| `dev` | Postgres + indexer (public testnet RPC) | day-to-day development |
+| `test` | disposable Postgres on host port :5433 | `make test-db` against a CI-style DB |
+| `prod` | Postgres + indexer with production defaults | rehearsal / smoke of a deploy |
+
+Start the dev stack — Postgres and the indexer together against the public
+Stellar testnet RPC, no external database required:
+
+```sh
+docker compose --profile dev up --build
+```
+
 The API is on http://localhost:8080; watch the logs to see events flow in.
-
 To watch specific contracts instead of everything:
 
-Shell
+```sh
+WATCHED_CONTRACTS=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC \
+  docker compose --profile dev up --build
+```
+
+The `test` profile exists for the test suite, so run
+`docker compose --profile test up -d` and point the suite at it with
+`TEST_DATABASE_URL=postgres://sorotrail:sorotrail@localhost:5433/sorotrail?sslmode=disable`
+before `make test-db`. It deliberately starts only the database (no indexer):
+the integration suite truncates shared tables between packages, so a live
+writer in the same database would race it. The 5433 host port matches CI's
+test job, so the same `TEST_DATABASE_URL` works in both places.
+
+The `prod` profile is a production-flavored reference for `docker compose
+--profile prod up -d`: same two services with persistent volumes,
+`restart: always`, and the database not published to the host. Override
+`RPC_URL` for mainnet/paid providers and `DATABASE_URL` to use managed
+or external Postgres.
 
 **Container health.** The published image ships with a `HEALTHCHECK` that
-probes `/health` via the in-binary `sorotrail healthcheck` subcommand
+probes `/readyz` via the in-binary `sorotrail healthcheck` subcommand
 (alpine has no curl/wget — installing curl or shipping a second binary
 would just grow the image; routing the probe through the existing
 binary reuses the `net/http` client that's already linked in for the
 server, so the cost is a few hundred bytes of flag-parsing and a probe
 function). Compose mirrors the same probe so `docker ps` shows an
 honest health status, and combined with `depends_on: condition:
-service_healthy` on Postgres, a fresh `docker compose up --build`
+service_healthy` on Postgres, a fresh `docker compose --profile dev up --build`
 brings the stack up in the right order instead of hoping the indexer
-wins a race against a half-up database.
+wins a race against a half-up database. The probe hits `/readyz`, the
+strongest signal the server exposes — database reachable, RPC healthy,
+no ingestion lag — so a green container is ready to serve traffic, not
+merely alive.
 
-WATCHED_CONTRACTS=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC docker compose up --build
-Bare metal
-Shell
+### Bare metal
 
-docker compose up -d postgres     # or bring your own Postgres
+```sh
+docker compose --profile dev up -d postgres     # or bring your own Postgres
 cp .env.example .env              # adjust as needed
 set -a; source .env; set +a
 make run

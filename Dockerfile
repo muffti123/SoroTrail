@@ -20,12 +20,19 @@ USER sorotrail
 COPY --from=build /out/sorotrail /usr/local/bin/sorotrail
 EXPOSE 8080
 
-# Container HEALTHCHECK runs against the same `/health` endpoint the
-# Helm chart's liveness/readiness probes target, so docker compose and
-# k8s both examine one consistent signal. The probe uses the binary
-# already shipped in the image — alpine has no curl/wget, and we
-# deliberately do not install one to keep the image slim and the
-# forensic surface tiny (no shell access required to probe).
+# Container HEALTHCHECK runs against `/readyz`, the same readiness signal
+# the Helm chart's readiness probe targets (and the name a `docker ps`
+# reader expects: "healthy" means "ready to serve", not merely "alive").
+# `/readyz` is the strongest of the three probes — it fails unless the
+# database is reachable, the RPC endpoint reports healthy, and ingestion
+# is not lagging more than 100 ledgers — so a green container really can
+# take traffic. `/livez` (process alive) would report healthy while the
+# database is down and `/health` (DB + RPC) would miss a poisoned
+# ingestion pipe, both of which the container state would then mask.
+#
+# The probe uses the binary already shipped in the image — alpine has no
+# curl/wget, and we deliberately do not install one to keep the image
+# slim and the forensic surface tiny (no shell access required to probe).
 #
 #   interval=10s   matches the per-poll cadence (5s) with margin; logs
 #                   show one probe line at most every 10s, not on
@@ -43,7 +50,10 @@ EXPOSE 8080
 # then 127.0.0.1:8080, so an operator who overrides HTTP_ADDR inside
 # this image (or in compose env) gets a probe that follows the same
 # port rather than silently failing on a stale hardcoded value.
+#
+# --endpoint is explicit (not the subcommand default) so the probe's
+# target survives a default change and stays visible to operators.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["sorotrail", "healthcheck", "--endpoint", "/health", "--timeout", "3s"]
+    CMD ["sorotrail", "healthcheck", "--endpoint", "/readyz", "--timeout", "3s"]
 
 ENTRYPOINT ["sorotrail"]

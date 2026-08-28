@@ -46,14 +46,20 @@ spec:
                   key: {{ .Values.database.existingSecretKey }}
           livenessProbe:
             httpGet:
-              path: /health
+              # /livez is process-only: the pod stays alive through a DB
+              # blip (readiness pulls it from rotation instead of a
+              # restart loop) but a wedged process is restarted.
+              path: /livez
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              # /readyz is the container's HEALTHCHECK signal too, so
+              # k8s and docker gate traffic on the same check: DB
+              # reachable, RPC healthy, no ingestion lag.
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10

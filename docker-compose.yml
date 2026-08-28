@@ -1,12 +1,40 @@
+# SoroTrail Compose — three environments as Compose profiles.
+#
+#   docker compose --profile dev  up --build   # developer stack (default)
+#   docker compose --profile test up -d        # disposable DB for `make test-db`
+#   docker compose --profile prod up -d        # production-flavored stack
+#
+# Exactly one profile at a time. postgres (dev) and prod-postgres are
+# distinct databases, and indexer (dev) and prod-indexer both bind host
+# port 8080, so mixing profiles in a single `up` fails loudly instead of
+# silently running two writers or two API servers.
+#
+# Dockerfile-authoritative healthchecks: the image's HEALTHCHECK and the
+# compose healthchecks here both probe `/readyz` (readiness — DB up, RPC
+# healthy, no ingestion lag) via the in-binary `sorotrail healthcheck`
+# subcommand, so `docker ps`, `docker inspect`, and dependent services
+# all observe the same signal.
+name: sorotrail
+
+# Shared sorotrail healthcheck tuning; the probe target/args are written
+# per service so they stay in view (and operator-editable) at each site.
+x-indexer-healthcheck: &indexer-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 10s
+
 services:
+  ### dev — postgres + indexer against the public testnet RPC. ###
+  # The host DB port (5432) must match DATABASE_URL in the Makefile so
+  # `make test-db` works out of the box after a `docker compose up`.
   postgres:
+    profiles: ["dev"]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: sorotrail
       POSTGRES_PASSWORD: sorotrail
       POSTGRES_DB: sorotrail
-    # The host port here must match DATABASE_URL in the Makefile so that
-    # `make test-db` works out of the box after `make docker-up`.
     ports:
       - "5432:5432"
     volumes:
@@ -19,6 +47,7 @@ services:
     restart: unless-stopped
 
   indexer:
+    profiles: ["dev"]
     build: .
     depends_on:
       postgres:
@@ -36,29 +65,92 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "8080:8080"
-    # Probe `/health` using the same binary already shipped in the
-    # image (the docker HEALTHCHECK directive sets this; repeat it
-    # here so users running against a published image — where the
-    # Dockerfile is authoritative — see the same shape in compose).
-    # Flags mirror the Dockerfile defaults and stay operator-editable.
-    # --addr is intentionally omitted: the probe falls back to
-    # $HTTP_ADDR (rewritten to 127.0.0.1:<port> for the loopback-only
-    # probe) then 127.0.0.1:8080, so the probe follows whichever port
-    # HTTP_ADDR names rather than drifting against a hardcoded one.
+    # Probe `/readyz` with the same binary already shipped in the image
+    # (the Dockerfile HEALTHCHECK directive sets this; repeat it here so
+    # users running against a published image — where the Dockerfile is
+    # authoritative — see the same shape in compose). Flags mirror the
+    # Dockerfile defaults and stay operator-editable. --addr is omitted
+    # so the probe follows $HTTP_ADDR (loopback-only) then 127.0.0.1:8080.
     healthcheck:
+      <<: *indexer-healthcheck
       test:
         - "CMD"
         - "sorotrail"
         - "healthcheck"
         - "--endpoint"
-        - "/health"
+        - "/readyz"
         - "--timeout"
         - "3s"
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     restart: unless-stopped
+
+  ### test — disposable Postgres for `make test-db`. ###
+  # Deliberately just a database: the suite truncates shared tables
+  # between packages, so a live indexer writing into the same DB would
+  # race the tests. The host port (5433) matches CI's test job, so
+  # TEST_DATABASE_URL works verbatim from the host Go toolchain.
+  testdb:
+    profiles: ["test"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sorotrail
+      POSTGRES_PASSWORD: sorotrail
+      POSTGRES_DB: sorotrail
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sorotrail -d sorotrail"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    # No volume: this database exists to be created and thrown away.
+
+  ### prod — production-flavored postgres + indexer. ###
+  # The database is not published to the host; only the API is exposed.
+  # Point RPC_URL at mainnet or a paid provider, and DATABASE_URL at an
+  # external or managed Postgres instead of the bundled one if preferred.
+  prod-postgres:
+    profiles: ["prod"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sorotrail
+      POSTGRES_PASSWORD: sorotrail
+      POSTGRES_DB: sorotrail
+    volumes:
+      - pgdata-prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sorotrail"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: always
+
+  prod-indexer:
+    profiles: ["prod"]
+    build: .
+    depends_on:
+      prod-postgres:
+        condition: service_healthy
+    environment:
+      RPC_URL: ${RPC_URL:-https://soroban-testnet.stellar.org}
+      DATABASE_URL: ${DATABASE_URL:-postgres://sorotrail:sorotrail@prod-postgres:5432/sorotrail?sslmode=disable}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5s}
+      HTTP_ADDR: ":8080"
+      WATCHED_CONTRACTS: ${WATCHED_CONTRACTS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      <<: *indexer-healthcheck
+      test:
+        - "CMD"
+        - "sorotrail"
+        - "healthcheck"
+        - "--endpoint"
+        - "/readyz"
+        - "--timeout"
+        - "3s"
+    restart: always
 
 volumes:
   pgdata:
+  pgdata-prod:

@@ -31,10 +31,14 @@ const healthcheckTimeoutDefault = 3 * time.Second
 const healthcheckAddrDefault = "127.0.0.1:8080"
 
 // healthcheckEndpointDefault is the default HTTP path the probe
-// hits. /health is the same endpoint the Helm chart's
-// liveness/readiness probes target, so docker HEALTHCHECK,
-// docker compose, and k8s probes all examine the same signal.
-const healthcheckEndpointDefault = "/health"
+// hits. /readyz is the same readiness signal the Dockerfile
+// HEALTHCHECK, the compose healthcheck, and the Helm chart's
+// readiness probe target, so docker and k8s both gate traffic on
+// one consistent check. It is the strongest of the three probes:
+// it fails unless the database pings, the RPC endpoint reports
+// healthy, and ingestion is not lagging — a green container is
+// ready to serve, not merely alive.
+const healthcheckEndpointDefault = "/readyz"
 
 // healthcodeExitUsage is returned by runHealthcheck when flag
 // parsing fails or required arguments are missing. main.go maps 2
@@ -68,11 +72,13 @@ func runHealthcheck(args []string) int {
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), `usage: sorotrail healthcheck [flags]
 
-Probes the indexer's HTTP /health endpoint and exits 0 on a 2xx
-response, 1 on any failure (non-2xx, network error, timeout). Used
-as the docker HEALTHCHECK probe so the container has a real health
-signal instead of "the process is running", and so docker compose
-can gate dependent services on actual readiness instead of a sleep.
+Probes the indexer's HTTP /readyz endpoint and exits 0 on a 2xx
+response, 1 on any failure (non-2xx, network error, timeout). /readyz
+reports true readiness (database reachable, RPC healthy, no ingestion
+lag), which is what a container state or orchestrator gate should test.
+Used as the docker HEALTHCHECK probe so the container has a real health
+signal instead of "the process is running", and so docker compose can
+gate dependent services on actual readiness instead of a sleep.
 
 flags:
 `)
@@ -81,7 +87,7 @@ flags:
 	addrFlag := fs.String("addr", "",
 		"host:port to probe (defaults to $HTTP_ADDR or 127.0.0.1:8080)")
 	endpoint := fs.String("endpoint", healthcheckEndpointDefault,
-		"URL path probed on the indexer (e.g. /health, /livez)")
+		"URL path probed on the indexer (e.g. /readyz, /livez)")
 	timeout := fs.Duration("timeout", healthcheckTimeoutDefault,
 		"HTTP client timeout for the probe")
 	if err := fs.Parse(args); err != nil {
@@ -103,7 +109,7 @@ flags:
 	url := "http://" + target + *endpoint
 
 	client := &http.Client{Timeout: *timeout}
-	// We deliberately don't follow redirects: /health is a fixed
+	// We deliberately don't follow redirects: the probe target is a fixed
 	// local path, and a 3xx would mean the indexer is misconfigured,
 	// not "the answer is elsewhere". Following a redirect could mask
 	// a real misconfiguration behind a successful probe.
@@ -133,7 +139,7 @@ flags:
 	}
 	defer resp.Body.Close()
 	// Drain a bounded prefix so the connection can be reused by
-	// the keep-alive pool. /health responses are tiny (a small
+	// the keep-alive pool. /readyz responses are tiny (a small
 	// JSON envelope) but we cap the read rather than reading
 	// until EOF, so a malicious or misbehaving server can't pin
 	// the process open after we've already decided the probe's

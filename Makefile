@@ -152,9 +152,11 @@ migrate-down:
 	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" down 1
 
 docker-up:
-	docker compose up -d --build
+	docker compose --profile dev up -d --build
 
 docker-down:
+	# `down` is profile-agnostic: it stops every sorotrail project
+	# container regardless of which profile started it.
 	docker compose down
 
 clean:
