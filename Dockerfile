@@ -20,10 +20,10 @@ USER sorotrail
 COPY --from=build /out/sorotrail /usr/local/bin/sorotrail
 EXPOSE 8080
 
-# Container HEALTHCHECK runs against the same `/health` endpoint the
-# Helm chart's liveness/readiness probes target, so docker compose and
-# k8s both examine one consistent signal. The probe uses the binary
-# already shipped in the image — alpine has no curl/wget, and we
+# Container HEALTHCHECK probes the readiness endpoint `/readyz` — the same
+# signal the Helm chart's readiness probe targets, so Docker and
+# orchestration examine one dependency-aware check. The probe uses the
+# binary already shipped in the image — alpine has no curl/wget, and we
 # deliberately do not install one to keep the image slim and the
 # forensic surface tiny (no shell access required to probe).
 #
@@ -44,6 +44,6 @@ EXPOSE 8080
 # this image (or in compose env) gets a probe that follows the same
 # port rather than silently failing on a stale hardcoded value.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["sorotrail", "healthcheck", "--endpoint", "/health", "--timeout", "3s"]
+    CMD ["sorotrail", "healthcheck", "--endpoint", "/readyz", "--timeout", "3s"]
 
 ENTRYPOINT ["sorotrail"]

@@ -30,10 +30,11 @@ const healthcheckTimeoutDefault = 3 * time.Second
 // never depend on a network-accessible interface.
 const healthcheckAddrDefault = "127.0.0.1:8080"
 
-// healthcheckEndpointDefault is the default HTTP path the probe
-// hits. /health is the same endpoint the Helm chart's
-// liveness/readiness probes target, so docker HEALTHCHECK,
-// docker compose, and k8s probes all examine the same signal.
+// healthcheckEndpointDefault is the default HTTP path the probe hits
+// when the caller doesn't pass --endpoint. It stays at /health as a
+// liveness-flavoured default; the container HEALTHCHECK and the compose
+// services pass --endpoint /readyz so Docker and k8s probe the same
+// dependency-aware readiness signal.
 const healthcheckEndpointDefault = "/health"
 
 // healthcodeExitUsage is returned by runHealthcheck when flag

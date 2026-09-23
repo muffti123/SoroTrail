@@ -94,10 +94,10 @@ migrate-down:
 	migrate -path $(MIGRATIONS) -database "$(DATABASE_URL)" down 1
 
 docker-up:
-	docker compose up -d --build
+	docker compose --profile prod up -d --build
 
 docker-down:
-	docker compose down
+	docker compose --profile dev --profile test --profile prod down
 
 clean:
 	rm -rf bin coverage.out
