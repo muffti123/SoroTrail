@@ -17,7 +17,6 @@ HTTP API long after the RPC has forgotten them.
 ```
 
 ## Quickstart
-text
 
 ### Published image (fastest)
 
@@ -35,35 +34,43 @@ Pin a specific release with a version tag instead of `latest`, e.g.
 `ghcr.io/sorotrail/sorotrail:v1.2.0`. See [Configuration](#configuration) for
 the full list of environment variables.
 
-### Docker Compose (full stack)
+### Docker Compose profiles
 
-Brings up Postgres and the indexer together — no external database required:
+The Compose file has three explicit profiles. Each starts Postgres and an API
+service; `test` additionally starts the deterministic mock RPC.
 
-docker compose up --build
-This starts Postgres and the indexer against the public Stellar testnet RPC.
-The API is on http://localhost:8080; watch the logs to see events flow in.
+```sh
+# Development: public RPC, rebuild the image, and follow logs.
+docker compose --profile dev up --build
+
+# Tests: Postgres + mockrpc + test-indexer.
+docker compose --profile test up --build
+
+# Production-like local stack: public RPC and restart policies enabled.
+docker compose --profile prod up -d --build
+```
+
+The API is available at http://localhost:8080. Stop a profile with
+`docker compose --profile <profile> down`.
+
+The image and Compose service define a Docker `HEALTHCHECK` that runs the
+in-binary probe against `/readyz`. Readiness includes the database, RPC, and
+schema, so `docker inspect <container> --format '{{.State.Health.Status}}'`
+transitions from `starting` to `healthy` or `unhealthy` as those dependencies
+change. Postgres uses its own `pg_isready` check and the API waits for it with
+`depends_on: condition: service_healthy`.
 
 To watch specific contracts instead of everything:
 
-Shell
+```sh
+WATCHED_CONTRACTS=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC \
+  docker compose --profile dev up --build
+```
 
-**Container health.** The published image ships with a `HEALTHCHECK` that
-probes `/health` via the in-binary `sorotrail healthcheck` subcommand
-(alpine has no curl/wget — installing curl or shipping a second binary
-would just grow the image; routing the probe through the existing
-binary reuses the `net/http` client that's already linked in for the
-server, so the cost is a few hundred bytes of flag-parsing and a probe
-function). Compose mirrors the same probe so `docker ps` shows an
-honest health status, and combined with `depends_on: condition:
-service_healthy` on Postgres, a fresh `docker compose up --build`
-brings the stack up in the right order instead of hoping the indexer
-wins a race against a half-up database.
+Bare metal:
 
-WATCHED_CONTRACTS=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC docker compose up --build
-Bare metal
-Shell
-
-docker compose up -d postgres     # or bring your own Postgres
+```sh
+docker compose --profile dev up -d postgres     # or bring your own Postgres
 cp .env.example .env              # adjust as needed
 set -a; source .env; set +a
 make run

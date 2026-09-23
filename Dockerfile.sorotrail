@@ -10,4 +10,5 @@ FROM alpine:3.24
 RUN apk add --no-cache ca-certificates
 COPY --from=build /sorotrail /sorotrail
 EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 CMD ["/sorotrail", "healthcheck", "--endpoint", "/readyz", "--timeout", "3s"]
 ENTRYPOINT ["/sorotrail"]

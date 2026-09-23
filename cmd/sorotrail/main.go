@@ -96,8 +96,8 @@ subcommands:
                (sorotrail backfill --help)
   index-addresses  rebuild the address→event inverted index from stored events
                (sorotrail index-addresses --help)
-  healthcheck  probe /health and exit (used by docker HEALTHCHECK)
-               (sorotrail healthcheck --help)
+  healthcheck  probe /readyz (configurable via --endpoint); used by docker
+               HEALTHCHECK (sorotrail healthcheck --help)
 `)
 }
 
